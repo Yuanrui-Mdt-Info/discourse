@@ -77,6 +77,17 @@ class TopicList
     @topics ||= load_topics
   end
 
+  def nutriscale_likes
+    return {} unless current_user
+
+    @nutriscale_likes ||=
+      PostAction.where(
+        user_id: current_user.id,
+        post_id: topics.filter_map { |topic| topic.first_post&.id },
+        post_action_type_id: PostActionType.types[:like],
+      ).index_by(&:post_id)
+  end
+
   def categories
     @categories ||=
       topics.map { |t| [t.category&.parent_category, t.category] }.flatten.uniq.compact
@@ -145,7 +156,7 @@ class TopicList
 
     topic_preloader_associations << :localizations if SiteSetting.content_localization_enabled
 
-    topic_preloader_associations << :first_post
+    topic_preloader_associations << { first_post: :user }
 
     DiscoursePluginRegistry.topic_preloader_associations.each do |a|
       fields = a[:fields]
@@ -161,6 +172,8 @@ class TopicList
       records: @topics,
       associations: topic_preloader_associations,
     ).call
+
+    @topics.each { |topic| topic.first_post.association(:topic).target = topic if topic.first_post }
 
     if preloaded_custom_fields.present?
       Topic.preload_custom_fields(@topics, preloaded_custom_fields)

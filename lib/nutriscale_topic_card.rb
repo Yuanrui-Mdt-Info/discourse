@@ -10,8 +10,10 @@ class NutriscaleTopicCard
       document
         .css("img[src], a[href], video, .video-placeholder-container[data-video-src]")
         .filter_map do |node|
-          next if node.ancestors.any? do |ancestor|
-            ancestor.element? && ancestor.matches?("video, .video-placeholder-container")
+          if node.ancestors.any? { |ancestor|
+               ancestor.element? && ancestor.matches?("video, .video-placeholder-container")
+             }
+            next
           end
           next if node.key?(PrettyText::BLOCKED_HOTLINKED_SRC_ATTR)
 
@@ -55,6 +57,11 @@ class NutriscaleTopicCard
         plain_hashtags: true,
       ).squish
 
-    { post_id: post.id, excerpt: excerpt, media: media.uniq { |item| [item[:kind], item[:url]] } }
+    {
+      post_id: post.id,
+      challenge_id: post.raw.to_s[/<!-- nutricircle-challenge:(\d+) -->/, 1]&.to_i,
+      excerpt: excerpt,
+      media: media.uniq { |item| [item[:kind], item[:url]] },
+    }
   end
 end
