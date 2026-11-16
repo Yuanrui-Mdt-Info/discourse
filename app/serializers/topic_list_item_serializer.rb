@@ -13,6 +13,7 @@ class TopicListItemSerializer < ListableTopicSerializer
              :op_can_like,
              :op_liked,
              :first_post_id,
+             :nutriscale_card,
              :pinned_globally,
              :liked_post_numbers,
              :featured_link,
@@ -25,6 +26,32 @@ class TopicListItemSerializer < ListableTopicSerializer
 
   has_many :posters, serializer: TopicPosterSerializer, embed: :objects
   has_many :participants, serializer: TopicPosterSerializer, embed: :objects
+
+  def nutriscale_card
+    first_post = object.first_post
+    return if !first_post || first_post.trashed? || (first_post.hidden? && !scope.is_staff?)
+
+    like =
+      if scope.user
+        if object.topic_list
+          object.topic_list.nutriscale_likes[first_post.id]
+        else
+          PostAction.find_by(
+            user_id: scope.user.id,
+            post_id: first_post.id,
+            post_action_type_id: PostActionType.types[:like],
+          )
+        end
+      end
+    like.association(:post).target = first_post if like
+    taken_actions = like ? { PostActionType.types[:like] => like } : {}
+    can_like = scope.post_can_act?(first_post, :like, opts: { taken_actions: taken_actions })
+    if like && SiteSetting.allow_likes_in_anonymous_mode && !scope.can_delete_post_action?(like)
+      can_like = false
+    end
+
+    NutriscaleTopicCard.build(first_post).merge(liked: like.present?, can_like: can_like)
+  end
 
   def include_participant_groups?
     object.private_message?

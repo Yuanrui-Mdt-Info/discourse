@@ -11,6 +11,33 @@ RSpec.describe ListController do
     SiteSetting.top_menu = "latest|new|categories"
   end
 
+  describe "topic cards" do
+    it "includes cards in latest and category lists without exposing restricted topics" do
+      category = Fabricate(:category)
+      public_post =
+        Fabricate(:post, topic: Fabricate(:topic, category: category), cooked: "<p>Breakfast</p>")
+      private_category = Fabricate(:private_category, group: group)
+      private_post = Fabricate(:post, topic: Fabricate(:topic, category: private_category))
+
+      ["/latest.json", "/c/#{category.slug}/#{category.id}/l/latest.json"].each do |path|
+        get path
+
+        expect(response.status).to eq(200)
+        topics = response.parsed_body["topic_list"]["topics"]
+        expect(topics.map { |entry| entry["id"] }).not_to include(private_post.topic_id)
+        card = topics.find { |entry| entry["id"] == public_post.topic_id }.fetch("nutriscale_card")
+        expect(card).to eq(
+          "post_id" => public_post.id,
+          "challenge_id" => nil,
+          "excerpt" => "Breakfast",
+          "media" => [],
+          "liked" => false,
+          "can_like" => false,
+        )
+      end
+    end
+  end
+
   describe "#filter unified New membership" do
     before { SiteSetting.enable_unified_new = true }
 
