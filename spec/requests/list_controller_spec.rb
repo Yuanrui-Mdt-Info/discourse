@@ -26,7 +26,14 @@ RSpec.describe ListController do
         topics = response.parsed_body["topic_list"]["topics"]
         expect(topics.map { |entry| entry["id"] }).not_to include(private_post.topic_id)
         card = topics.find { |entry| entry["id"] == public_post.topic_id }.fetch("nutriscale_card")
-        expect(card).to eq("post_id" => public_post.id, "excerpt" => "Breakfast", "media" => [])
+        expect(card).to eq(
+          "post_id" => public_post.id,
+          "challenge_id" => nil,
+          "excerpt" => "Breakfast",
+          "media" => [],
+          "liked" => false,
+          "can_like" => false,
+        )
       end
     end
   end

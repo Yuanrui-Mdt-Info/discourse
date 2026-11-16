@@ -208,6 +208,17 @@ interface ExpectedTopicFields {
   message_bus_last_id?: number;
   new_posts?: number;
   notification_level?: number;
+  nutriscale_card?: {
+    post_id: number;
+    challenge_id: number | null;
+    excerpt: string;
+    media: (
+      | { kind: "image"; url: string }
+      | { kind: "video"; url: string; poster_url: string | null }
+    )[];
+    liked: boolean;
+    can_like: boolean;
+  } | null;
   op_can_like?: boolean;
   op_like_count?: number | null;
   op_liked?: boolean;

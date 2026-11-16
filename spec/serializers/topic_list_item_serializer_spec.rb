@@ -54,6 +54,9 @@ RSpec.describe TopicListItemSerializer do
 
       expect(serializer.as_json[:nutriscale_card]).to eq(
         post_id: first_post.id,
+        challenge_id: nil,
+        liked: false,
+        can_like: false,
         excerpt: "Breakfast & lunch.",
         media: [
           { kind: "image", url: "/uploads/breakfast.jpg" },
@@ -94,6 +97,9 @@ RSpec.describe TopicListItemSerializer do
 
       expect(serializer.as_json[:nutriscale_card]).to eq(
         post_id: first_post.id,
+        challenge_id: nil,
+        liked: false,
+        can_like: false,
         excerpt: "Breakfast recipe",
         media: [
           { kind: "video", url: "//example.com/uploads/breakfast.MP4?download=1", poster_url: nil },
@@ -104,13 +110,14 @@ RSpec.describe TopicListItemSerializer do
 
     it "uses the current first post and native excerpt length for text-only cards" do
       SiteSetting.topic_excerpt_maxlength = 20
-      first_post.update_columns(cooked: "<p>#{'breakfast ' * 10}</p>")
+      first_post.update_columns(cooked: "<p>#{"breakfast " * 10}</p>")
       initial_card = serializer.as_json[:nutriscale_card]
       expect(initial_card[:excerpt]).to end_with("...")
       expect(initial_card[:media]).to eq([])
 
       first_post.update_columns(cooked: "<p>Updated breakfast</p>")
-      updated_card = described_class.new(card_topic.reload, scope: Guardian.new, root: false).as_json
+      updated_card =
+        described_class.new(card_topic.reload, scope: Guardian.new, root: false).as_json
       expect(updated_card[:nutriscale_card][:excerpt]).to eq("Updated breakfast")
     end
 
@@ -131,6 +138,70 @@ RSpec.describe TopicListItemSerializer do
 
       first_post.trash!
       expect(serializer.as_json[:nutriscale_card]).to eq(nil)
+    end
+
+    it "reads the activity marker from the first post rather than a reply or tag" do
+      first_post.update_columns(raw: "Breakfast\n<!-- nutricircle-challenge:19 -->")
+      Fabricate(:post, topic: card_topic, raw: "Reply\n<!-- nutricircle-challenge:20 -->")
+      expect(serializer.nutriscale_card[:challenge_id]).to eq(19)
+    end
+
+    it "uses native like permissions for guests, authors, other users and archived topics" do
+      reader = Fabricate(:user)
+      expect(serializer.nutriscale_card).to include(liked: false, can_like: false)
+      author_card = described_class.new(card_topic, scope: author.guardian).nutriscale_card
+      expect(author_card).to include(liked: false, can_like: false)
+      reader_card = described_class.new(card_topic, scope: reader.guardian).nutriscale_card
+      expect(reader_card).to include(liked: false, can_like: true)
+
+      PostActionCreator.like(reader, first_post)
+      liked_card = described_class.new(card_topic, scope: reader.guardian).nutriscale_card
+      expect(liked_card).to include(liked: true, can_like: false)
+
+      card_topic.update!(archived: true)
+      other_card = described_class.new(card_topic, scope: Fabricate(:user).guardian).nutriscale_card
+      expect(other_card).to include(liked: false, can_like: false)
+    end
+
+    it "denies likes for silenced users" do
+      reader = Fabricate(:user, silenced_till: 1.day.from_now)
+      card = described_class.new(card_topic, scope: reader.guardian).nutriscale_card
+      expect(card).to include(liked: false, can_like: false)
+    end
+
+    it "loads likes once for the whole list and keeps them specific to each viewer" do
+      reader = Fabricate(:user)
+      another_post = Fabricate(:post)
+      PostActionCreator.like(reader, first_post)
+      topic_ids = [first_post.topic_id, another_post.topic_id]
+      list = TopicQuery.new(reader).list_latest
+      list.topics
+      guardian = reader.guardian
+      cards = nil
+      queries =
+        track_sql_queries do
+          cards =
+            list.topics.map { |entry| described_class.new(entry, scope: guardian).nutriscale_card }
+        end
+      expect(cards.find { |card| card[:post_id] == first_post.id }).to include(
+        liked: true,
+        can_like: false,
+      )
+      expect(cards.find { |card| card[:post_id] == another_post.id }).to include(
+        liked: false,
+        can_like: true,
+      )
+      expect(queries.grep(/FROM "post_actions"/i).size).to eq(1)
+      expect(queries.grep(/FROM "posts"/i)).to eq([])
+
+      other_reader = Fabricate(:user)
+      other_list = TopicQuery.new(other_reader).list_latest
+      other_cards =
+        other_list
+          .topics
+          .select { |entry| topic_ids.include?(entry.id) }
+          .map { |entry| described_class.new(entry, scope: other_reader.guardian).nutriscale_card }
+      expect(other_cards.map { |card| card[:liked] }).to eq([false, false])
     end
 
     it "does not query the database when serializing preloaded first posts" do
