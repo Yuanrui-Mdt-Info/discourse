@@ -11,14 +11,17 @@ class NutriscaleTopicCard
         .css("img[src], video, .video-placeholder-container[data-video-src]")
         .filter_map do |node|
           next if node.ancestors.any? do |ancestor|
-            ancestor.matches?("video, .video-placeholder-container")
+            ancestor.element? && ancestor.matches?("video, .video-placeholder-container")
           end
           next if node.key?(PrettyText::BLOCKED_HOTLINKED_SRC_ATTR)
 
           if node.name == "img"
             next if node.matches?(".emoji, .site-icon, .onebox-avatar, .onebox-avatar-inline")
 
-            lightbox = node.ancestors.find { |ancestor| ancestor.matches?("a.lightbox") }
+            lightbox =
+              node.ancestors.find do |ancestor|
+                ancestor.element? && ancestor.matches?("a.lightbox")
+              end
             url = lightbox&.[]("href").presence || node["src"]
             { kind: "image", url: url } if url.present?
           else
