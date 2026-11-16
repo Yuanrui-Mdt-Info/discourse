@@ -13,6 +13,7 @@ class TopicListItemSerializer < ListableTopicSerializer
              :op_can_like,
              :op_liked,
              :first_post_id,
+             :nutriscale_card,
              :pinned_globally,
              :liked_post_numbers,
              :featured_link,
@@ -25,6 +26,13 @@ class TopicListItemSerializer < ListableTopicSerializer
 
   has_many :posters, serializer: TopicPosterSerializer, embed: :objects
   has_many :participants, serializer: TopicPosterSerializer, embed: :objects
+
+  def nutriscale_card
+    first_post = object.first_post
+    return if !first_post || first_post.trashed? || (first_post.hidden? && !scope.is_staff?)
+
+    NutriscaleTopicCard.build(first_post)
+  end
 
   def include_participant_groups?
     object.private_message?
