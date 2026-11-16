@@ -4,11 +4,11 @@ class NutriscaleTopicCard
   def self.build(post)
     document = Nokogiri::HTML5.fragment(post.cooked.to_s)
     document.css("pre code.lang-nutricircle-challenge").each { |code| code.parent.remove }
-    document.css(".quote, .onebox, .spoiler, details").remove
+    document.css(".quote, .onebox:not(a), .spoiler, details").remove
 
     media =
       document
-        .css("img[src], video, .video-placeholder-container[data-video-src]")
+        .css("img[src], a[href], video, .video-placeholder-container[data-video-src]")
         .filter_map do |node|
           next if node.ancestors.any? do |ancestor|
             ancestor.element? && ancestor.matches?("video, .video-placeholder-container")
@@ -24,6 +24,12 @@ class NutriscaleTopicCard
               end
             url = lightbox&.[]("href").presence || node["src"]
             { kind: "image", url: url } if url.present?
+          elsif node.name == "a"
+            url = node["href"]
+            next unless FileHelper.supported_video_regexp.match?(url.split(/[?#]/, 2).first.to_s)
+
+            node.remove
+            { kind: "video", url: url, poster_url: nil }
           else
             url =
               node["data-video-src"].presence || node["src"].presence ||

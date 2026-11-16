@@ -85,6 +85,23 @@ RSpec.describe TopicListItemSerializer do
       )
     end
 
+    it "includes video attachment links using native video types and preserves normal links" do
+      first_post.update_columns(cooked: <<~HTML)
+        <p>Breakfast <a href="https://example.com/recipe">recipe</a></p>
+        <p><a href="//example.com/uploads/breakfast.MP4?download=1">breakfast.mp4</a></p>
+        <p><a class="onebox" href="/uploads/breakfast.webm">breakfast.webm</a></p>
+      HTML
+
+      expect(serializer.as_json[:nutriscale_card]).to eq(
+        post_id: first_post.id,
+        excerpt: "Breakfast recipe",
+        media: [
+          { kind: "video", url: "//example.com/uploads/breakfast.MP4?download=1", poster_url: nil },
+          { kind: "video", url: "/uploads/breakfast.webm", poster_url: nil },
+        ],
+      )
+    end
+
     it "uses the current first post and native excerpt length for text-only cards" do
       SiteSetting.topic_excerpt_maxlength = 20
       first_post.update_columns(cooked: "<p>#{'breakfast ' * 10}</p>")
