@@ -29,6 +29,106 @@ RSpec.describe TopicListItemSerializer do
     expect(serialized[:featured_link_root_domain]).to eq("discourse.org")
   end
 
+  describe "#nutriscale_card" do
+    fab!(:author, :user)
+    fab!(:first_post) { Fabricate(:post, user: author) }
+    let(:card_topic) { first_post.topic }
+    let(:serializer) { described_class.new(card_topic, scope: Guardian.new, root: false) }
+
+    it "returns first-post text and ordered media without metadata or duplicate lightbox images" do
+      first_post.update_columns(cooked: <<~HTML)
+        <p>Breakfast &amp; lunch.</p>
+        <pre><code class="lang-nutricircle-challenge">{"entryTag":"challenge-19"}</code></pre>
+        <div class="lightbox-wrapper">
+          <a class="lightbox" href="/uploads/breakfast.jpg">
+            <img src="/uploads/breakfast-small.jpg">
+            <div class="meta">breakfast.jpg 100 KB</div>
+          </a>
+        </div>
+        <div class="video-placeholder-container" data-video-src="/uploads/breakfast.mp4" data-thumbnail-src="/uploads/poster.jpg">
+          <img src="/uploads/poster.jpg"><span>Play video</span>
+        </div>
+        <img src="/uploads/breakfast.jpg">
+      HTML
+      Fabricate(:post, topic: card_topic, cooked: '<p>Reply</p><img src="/uploads/reply.jpg">')
+
+      expect(serializer.as_json[:nutriscale_card]).to eq(
+        post_id: first_post.id,
+        excerpt: "Breakfast & lunch.",
+        media: [
+          { kind: "image", url: "/uploads/breakfast.jpg" },
+          { kind: "video", url: "/uploads/breakfast.mp4", poster_url: "/uploads/poster.jpg" },
+        ],
+      )
+    end
+
+    it "supports video sources and excludes quoted, collapsed, decorative and blocked media" do
+      first_post.update_columns(cooked: <<~HTML)
+        <p>Breakfast</p>
+        <img class="emoji" src="/emoji/smile.png" alt=":smile:">
+        <img class="site-icon" src="/icon.png">
+        <aside class="quote"><img src="/quoted.jpg"></aside>
+        <aside class="onebox"><img src="/preview.jpg"></aside>
+        <details><summary>Hidden</summary><img src="/details.jpg"></details>
+        <span class="spoiler"><img src="/spoiler.jpg"></span>
+        <video src="/uploads/first.mp4" poster="/uploads/cover.jpg"></video>
+        <video><source src="/uploads/second.mp4"><img src="/fallback.jpg"></video>
+        <div class="video-placeholder-container" data-video-src="/404"></div>
+        <div class="video-placeholder-container" data-video-src="https://blocked.example/video.mp4" #{PrettyText::BLOCKED_HOTLINKED_SRC_ATTR}="https://blocked.example/video.mp4"></div>
+      HTML
+
+      expect(serializer.as_json[:nutriscale_card][:media]).to eq(
+        [
+          { kind: "video", url: "/uploads/first.mp4", poster_url: "/uploads/cover.jpg" },
+          { kind: "video", url: "/uploads/second.mp4", poster_url: nil },
+        ],
+      )
+    end
+
+    it "uses the current first post and native excerpt length for text-only cards" do
+      SiteSetting.topic_excerpt_maxlength = 20
+      first_post.update_columns(cooked: "<p>#{'breakfast ' * 10}</p>")
+      initial_card = serializer.as_json[:nutriscale_card]
+      expect(initial_card[:excerpt]).to end_with("...")
+      expect(initial_card[:media]).to eq([])
+
+      first_post.update_columns(cooked: "<p>Updated breakfast</p>")
+      updated_card = described_class.new(card_topic.reload, scope: Guardian.new, root: false).as_json
+      expect(updated_card[:nutriscale_card][:excerpt]).to eq("Updated breakfast")
+    end
+
+    it "hides flagged content from anonymous users and authors while allowing staff" do
+      first_post.update!(hidden: true)
+      expect(serializer.as_json[:nutriscale_card]).to eq(nil)
+      author_json = described_class.new(card_topic, scope: author.guardian, root: false).as_json
+      expect(author_json[:nutriscale_card]).to eq(nil)
+
+      staff_json =
+        described_class.new(card_topic, scope: Fabricate(:admin).guardian, root: false).as_json
+      expect(staff_json[:nutriscale_card][:post_id]).to eq(first_post.id)
+    end
+
+    it "returns null for missing or deleted first posts" do
+      missing_post_json = described_class.new(topic, scope: Guardian.new, root: false).as_json
+      expect(missing_post_json[:nutriscale_card]).to eq(nil)
+
+      first_post.trash!
+      expect(serializer.as_json[:nutriscale_card]).to eq(nil)
+    end
+
+    it "does not query the database when serializing preloaded first posts" do
+      another_post = Fabricate(:post)
+      topics =
+        Topic.where(id: [first_post.topic_id, another_post.topic_id]).includes(:first_post).to_a
+      serializers =
+        topics.map { |entry| described_class.new(entry, scope: Guardian.new, root: false) }
+      serializers.each(&:nutriscale_card)
+
+      queries = track_sql_queries { serializers.each(&:nutriscale_card) }
+      expect(queries).to eq([])
+    end
+  end
+
   describe "when topic featured link is disable" do
     before { SiteSetting.topic_featured_link_enabled = false }
 
