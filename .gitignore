@@ -76,6 +76,7 @@
 !/plugins/discourse-templates
 !/plugins/discourse-ai
 !/plugins/discourse-cakeday
+!/plugins/discourse-nutriscale-review
 !/plugins/discourse-rewind
 !/plugins/discourse-workflows
 !/plugins/live
